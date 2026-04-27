@@ -127,7 +127,7 @@ def chat_with_ai(phone, message):
 
 def send_whatsapp_reply(to_phone, message):
     """Send a reply back via Twilio WhatsApp."""
-    http_requests.post(
+    resp = http_requests.post(
         f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
         auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
         data={
@@ -136,6 +136,7 @@ def send_whatsapp_reply(to_phone, message):
             "Body": message,
         },
     )
+    print(f"Twilio send status: {resp.status_code} | {resp.text[:200]}")
 
 
 # --- Routes ---
