@@ -17,10 +17,10 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# WhatsApp Business API config
-WA_TOKEN = os.getenv("WA_TOKEN")           # Meta temporary access token
-WA_PHONE_ID = os.getenv("WA_PHONE_ID")     # Phone Number ID from Meta dashboard
-WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "tutor_bot_verify")
+# Twilio WhatsApp config
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
 LEADS_FILE = "leads.csv"
 CONVERSATIONS = {}  # in-memory conversation state keyed by phone number
@@ -125,73 +125,43 @@ def chat_with_ai(phone, message):
     return reply, extracted
 
 
-def send_whatsapp_message(to_phone, message):
-    """Send a reply back via WhatsApp Business API."""
+def send_whatsapp_reply(to_phone, message):
+    """Send a reply back via Twilio WhatsApp."""
     http_requests.post(
-        f"https://graph.facebook.com/v21.0/{WA_PHONE_ID}/messages",
-        headers={
-            "Authorization": f"Bearer {WA_TOKEN}",
-            "Content-Type": "application/json",
+        f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+        auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+        data={
+            "From": TWILIO_WHATSAPP_NUMBER,
+            "To": to_phone,
+            "Body": message,
         },
-        json={
-            "messaging_product": "whatsapp",
-            "to": to_phone,
-            "type": "text",
-            "text": {"body": message},
-        },
-        verify=SSL_VERIFY,
     )
 
 
 # --- Routes ---
 
-@app.route("/whatsapp", methods=["GET"])
-def verify_webhook():
-    """Meta webhook verification (required during setup)."""
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
+@app.route("/twilio", methods=["POST"])
+def twilio_webhook():
+    """Receive real WhatsApp messages via Twilio and auto-reply."""
+    phone = request.form.get("From", "")
+    message = request.form.get("Body", "")
 
-    if mode == "subscribe" and token == WA_VERIFY_TOKEN:
-        print("WhatsApp webhook verified!")
-        return challenge, 200
-    return "Forbidden", 403
+    if not message:
+        return "<Response></Response>", 200
 
-
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp_webhook():
-    """Receive real WhatsApp messages and auto-reply."""
-    body = request.json
+    phone_clean = phone.replace("whatsapp:", "")
+    print(f"WhatsApp from {phone_clean}: {message}")
 
     try:
-        entry = body["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-
-        # Skip non-message events (status updates, etc.)
-        if "messages" not in value:
-            return jsonify({"status": "ok"}), 200
-
-        msg = value["messages"][0]
-        phone = msg["from"]           # sender's phone number
-        message = msg["text"]["body"]  # message text
-
-        print(f"WhatsApp from {phone}: {message}")
-
-        # Get AI reply
-        reply, extracted = chat_with_ai(phone, message)
-
-        # Send reply back via WhatsApp
-        send_whatsapp_message(phone, reply)
-
-        print(f"Replied to {phone}: {reply[:80]}...")
+        reply, extracted = chat_with_ai(phone_clean, message)
+        send_whatsapp_reply(phone, reply)
+        print(f"Replied to {phone_clean}: {reply[:80]}...")
         if extracted and extracted.get("complete"):
-            print(f"Lead captured for {phone}!")
+            print(f"Lead captured for {phone_clean}!")
+    except Exception as e:
+        print(f"Error: {e}")
 
-    except (KeyError, IndexError) as e:
-        print(f"Skipping non-message event: {e}")
-
-    return jsonify({"status": "ok"}), 200
+    return "<Response></Response>", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -252,9 +222,8 @@ if __name__ == "__main__":
     else:
         print(f"GROQ_API_KEY loaded (ends with ...{GROQ_API_KEY[-4:]})")
         print(f"Using model: {GROQ_MODEL}")
-    if WA_TOKEN and WA_PHONE_ID:
-        print(f"WhatsApp connected (Phone ID: {WA_PHONE_ID})")
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        print(f"Twilio WhatsApp ready (sandbox: {TWILIO_WHATSAPP_NUMBER})")
     else:
-        print("WhatsApp not configured - simulated mode only")
-        print("Set WA_TOKEN and WA_PHONE_ID for real WhatsApp")
+        print("Twilio not configured - set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
     app.run(debug=True, port=5000)
